@@ -1,6 +1,7 @@
 
 #include "rtppayloadformatvideo.h"
 #include "rtpcomment.h"
+#include "stdlib.h"
 
 namespace rtppayloadformat
 {
@@ -55,6 +56,13 @@ namespace rtppayloadformat
 // +-+-+-+-+-+-+-+-+
 // |F|NRI|  Type   |
 // +---------------+
+// 0x67: SPS 
+// 0x68: PPS 
+// 0x65: IDR   
+// 0x61: non-IDR Slice
+// 0x01: B Slice
+// 0x06: SEI
+// 0x09: AU Delimiter
 // +---------------+
 // |0|1|2|3|4|5|6|7|
 // +-+-+-+-+-+-+-+-+
@@ -63,16 +71,32 @@ namespace rtppayloadformat
 
     // description：unpack rtp h264 fua to nal
     // return：true :the frame is end,  false: FU-A not end
-    RTPPayloadFormatH264::RTPPayloadFormatH264()
+    RTPPayloadFormatH264::RTPPayloadFormatH264():m_buf(NULL),m_buflen(0)
     {
-
+        m_buf = (uint8_t *)malloc(MAX_H264_NALU*sizeof(uint8_t));
+        if(m_buf == NULL)
+        {
+            std::cout<<" RTPPayloadFormatH264 malloc m_buf failed!" <<std::endl;
+        }
+        
     }
     RTPPayloadFormatH264::~RTPPayloadFormatH264()
     {
-
+        if(m_buf != NULL)
+        {
+            free(m_buf);
+        }
+        //free()
     }
+
     bool  RTPPayloadFormatH264::UnpackRTPH264FUA( void  *  bufIn,  int len,   void **  pBufOut,  int   *  pOutLen)
     {
+        if(m_buflen + len >= MAX_H264_NALU)
+        {
+            m_buflen = 0 ;
+            std::cout<<" buf len is overflow : " << MAX_H264_NALU <<std::endl;
+            return false;
+        }
         * pOutLen  =   0 ;
         rtpHlen = GetRTPHeaderLength(bufIn,len);
         if  (len  <  rtpHlen)
@@ -87,43 +111,57 @@ namespace rtppayloadformat
         unsigned  char  flag =  head2 &   0xe0 ; // FU header
         unsigned  char  nal_fua =  (head1 &   0xe0 )  |  (head2 &   0x1f); // FU_A nal
         bool  bFinishFrame =   false ;
+        uint32_t tmp_len = 0 ;
         if  (nal == 0x1c ) //  NAL type 0x1c=28
         { // fu-a
             if  (flag== 0x80 ) // START
             {
-                * pBufOut =  src - 3 ;
-                * (( int * )( * pBufOut))  =   0x01000000  ; //prefix {0x00,0x00,0x00,0x01} Little endian 
-                * ((char * )( * pBufOut) + 4 )  =  nal_fua;
-                *  pOutLen =  len -  RTP_HEADLEN +   3 ;
+                tmp_len = len -  rtpHlen +   3 ;
+                memcpy(m_buf + m_buflen, src - 3,tmp_len);
+                * ((int *)m_buf + m_buflen)   =   0x01000000  ; //prefix {0x00,0x00,0x00,0x01} Little endian start code
+                * ((char *)m_buf + m_buflen + 4 )  =  nal_fua;
+                m_buflen +=  tmp_len;
             }
             else   if (flag == 0x40 ) // END
             {
-                * pBufOut =  src + 2 ;
-                * pOutLen =  len -  RTP_HEADLEN -   2 ;
+                tmp_len = rtpHlen + 2;
+                memcpy(m_buf + m_buflen, src + 2,tmp_len)  ;
+                m_buflen += tmp_len;
             }
             else 
             {
-                * pBufOut =  src + 2 ;
-                * pOutLen =  len -  RTP_HEADLEN -   2 ;
+                tmp_len = rtpHlen + 2;
+                memcpy(m_buf + m_buflen, src + 2,tmp_len)  ;
+                m_buflen += tmp_len;
             }
         }
         else // Single NAL
         {
-            * pBufOut =  src - 4 ;
-            * (( int * )( * pBufOut))  =   0x01000000 ; ////prefix {0x00,0x00,0x00,0x01} Little endian 
-            *  pOutLen =  len -  RTP_HEADLEN +   4 ;
+            tmp_len = len - rtpHlen + 4;
+            memcpy(m_buf + m_buflen, src - 4, tmp_len)
+           
+            * (( int * )m_buf)  =   0x01000000 ; //prefix {0x00,0x00,0x00,0x01} Little endian start code 
+            m_buflen +=  tmp_len ;
         }
 
         unsigned char *  bufTmp  = (unsigned  char* )bufIn;
         if  (bufTmp[ 1 ]  &  0x80 )
         {
             bFinishFrame =   true ; // rtp mark
+            *pBufOut = m_buf; 
+            *pOutLen = m_buflen;
         }
         else
         {
             bFinishFrame =   false ;
+            *pOutLen = 0;
         }
         return  bFinishFrame;
     }
 
+}
+bool RTPPayloadFormatH264::PackRTPH264ToFUA(void * bufin, int len,void * rtpsession )
+{
+    
+    return true;
 }
